@@ -2,10 +2,11 @@ from datetime import datetime, timedelta
 import io
 import secrets
 from html import escape
+from pathlib import Path
 
 import pandas as pd
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, select
 
@@ -28,6 +29,34 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 MAX_RESUMES = 3
 TERMINATION_EVENTS = {"tab_switch", "copy_paste", "screen_blur"}
+BASE_DIR = Path(__file__).resolve().parent
+
+
+class RealtimeHub:
+    def __init__(self) -> None:
+        self.connections: dict[str, list[WebSocket]] = {}
+
+    async def connect(self, channel: str, websocket: WebSocket) -> None:
+        await websocket.accept()
+        self.connections.setdefault(channel, []).append(websocket)
+
+    def disconnect(self, channel: str, websocket: WebSocket) -> None:
+        current = self.connections.get(channel, [])
+        if websocket in current:
+            current.remove(websocket)
+        if not current and channel in self.connections:
+            del self.connections[channel]
+
+    async def broadcast(self, channel: str, payload: dict) -> None:
+        for ws in self.connections.get(channel, []):
+            await ws.send_json(payload)
+
+
+realtime_hub = RealtimeHub()
+
+
+def _exam_channel(exam_id: int) -> str:
+    return f"exam:{exam_id}"
 
 
 @app.on_event("startup")
@@ -134,7 +163,7 @@ async def upload_questions(
 
 
 @app.post("/student/exams/{exam_id}/proctor-event")
-def track_proctor_event(
+async def track_proctor_event(
     exam_id: int,
     student_id: int,
     payload: ProctorEventPayload,
@@ -157,15 +186,20 @@ def track_proctor_event(
     session.add(enrollment)
     session.commit()
 
-    return {
+    response = {
         "status": enrollment.status,
         "violations": enrollment.violation_count,
         "remaining_resume_attempts": max(0, MAX_RESUMES - enrollment.resume_count),
     }
+    await realtime_hub.broadcast(
+        _exam_channel(exam_id),
+        {"type": "proctor_event", "student_id": student_id, "payload": response},
+    )
+    return response
 
 
 @app.post("/student/exams/{exam_id}/resume")
-def resume_exam(
+async def resume_exam(
     exam_id: int,
     student_id: int,
     payload: ResumePayload,
@@ -194,11 +228,16 @@ def resume_exam(
     enrollment.status = "in_progress"
     session.add(enrollment)
     session.commit()
-    return {"status": enrollment.status, "resume_count": enrollment.resume_count}
+    response = {"status": enrollment.status, "resume_count": enrollment.resume_count}
+    await realtime_hub.broadcast(
+        _exam_channel(exam_id),
+        {"type": "resume", "student_id": student_id, "payload": response},
+    )
+    return response
 
 
 @app.post("/student/exams/{exam_id}/submit")
-def submit_exam(
+async def submit_exam(
     exam_id: int,
     student_id: int,
     payload: SubmitPayload,
@@ -246,7 +285,12 @@ def submit_exam(
     enrollment.status = "submitted"
     session.add(enrollment)
     session.commit()
-    return {"message": "Submitted"}
+    response = {"message": "Submitted"}
+    await realtime_hub.broadcast(
+        _exam_channel(exam_id),
+        {"type": "submission", "student_id": student_id, "payload": response},
+    )
+    return response
 
 
 @app.get("/faculty/exams/{exam_id}/export")
@@ -322,25 +366,71 @@ def _student_dashboard(session: Session, user_id: int) -> dict:
     }
 
 
+@app.get("/web/state")
+def web_state(user_id: int, session: Session = Depends(get_session)):
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.role == "faculty":
+        exams = _faculty_dashboard(session, user_id)["exams"]
+        return {
+            "user": {"id": user.id, "role": user.role, "email": user.email, "full_name": user.full_name},
+            "faculty_exams": [
+                {
+                    "id": e.id,
+                    "title": e.title,
+                    "exam_type": e.exam_type,
+                    "scheduled_start": e.scheduled_start.isoformat(),
+                    "scheduled_end": e.scheduled_end.isoformat(),
+                }
+                for e in exams
+            ],
+        }
+
+    data = _student_dashboard(session, user_id)
+    enrollments = data["enrollments"]
+    exam_map = data["exam_map"]
+    assigned_by_exam = data["assigned_by_exam"]
+    question_map = data["question_map"]
+    return {
+        "user": {"id": user.id, "role": user.role, "email": user.email, "full_name": user.full_name},
+        "student_exams": [
+            {
+                "exam_id": en.exam_id,
+                "title": exam_map[en.exam_id].title if en.exam_id in exam_map else "Unknown exam",
+                "status": en.status,
+                "violation_count": en.violation_count,
+                "resume_count": en.resume_count,
+                "questions": [
+                    {
+                        "question_id": sq.question_id,
+                        "question_text": question_map[sq.question_id].question_text
+                        if sq.question_id in question_map
+                        else "Unknown question",
+                    }
+                    for sq in assigned_by_exam.get(en.exam_id, [])
+                ],
+            }
+            for en in enrollments
+        ],
+    }
+
+
+@app.websocket("/ws/exams/{exam_id}")
+async def exam_realtime_stream(websocket: WebSocket, exam_id: int):
+    channel = _exam_channel(exam_id)
+    await realtime_hub.connect(channel, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        realtime_hub.disconnect(channel, websocket)
+
+
 @app.get("/", response_class=HTMLResponse)
-def home(request: Request):
-    return Response(
-        content="""
-<!doctype html><html><head><meta charset='utf-8'/><title>Proctored Exam Platform</title>
-<link rel='stylesheet' href='/static/styles.css'/></head><body><main class='container'>
-<h1>Proctored Exam Platform</h1>
-<p>Login with your allowed email to access the faculty or student dashboard.</p>
-<form method='post' action='/web/login' class='card form-grid'>
-<label>Email <input type='email' name='email' required/></label>
-<label>Full name <input type='text' name='full_name' required/></label>
-<label>Roll number (students) <input type='text' name='roll_number'/></label>
-<button type='submit'>Open Dashboard</button>
-</form><p class='hint'>Faculty example: vasuch9959@gmail.com</p>
-<p class='hint'>Student example: N2XXXXXX@rguktn.ac.in</p>
-</main></body></html>
-""",
-        media_type="text/html",
-    )
+def home():
+    return FileResponse(BASE_DIR / "static" / "index.html")
 
 
 @app.post("/web/login")
@@ -482,13 +572,13 @@ async def web_upload_questions(
 
 
 @app.post("/web/student/exams/{exam_id}/proctor")
-def web_proctor_event(
+async def web_proctor_event(
     exam_id: int,
     user_id: int = Form(...),
     event_type: str = Form(...),
     session: Session = Depends(get_session),
 ):
-    track_proctor_event(
+    await track_proctor_event(
         exam_id=exam_id,
         student_id=user_id,
         payload=ProctorEventPayload(event_type=event_type),
@@ -498,13 +588,13 @@ def web_proctor_event(
 
 
 @app.post("/web/student/exams/{exam_id}/resume")
-def web_resume_exam(
+async def web_resume_exam(
     exam_id: int,
     user_id: int = Form(...),
     passcode: str = Form(...),
     session: Session = Depends(get_session),
 ):
-    resume_exam(
+    await resume_exam(
         exam_id=exam_id,
         student_id=user_id,
         payload=ResumePayload(passcode=passcode),
@@ -528,7 +618,7 @@ async def web_submit_exam(
             question_id = key.replace("answer_", "")
             answers.append({"question_id": int(question_id), "answer_text": value})
 
-    submit_exam(
+    await submit_exam(
         exam_id=exam_id,
         student_id=user_id,
         payload=SubmitPayload(answers=answers),

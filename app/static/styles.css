@@ -10,3 +10,5 @@ button:hover { background: #1d4ed8; }
 label { font-size: 0.95rem; display: grid; gap: 0.35rem; }
 .hint { color: #6b7280; font-size: 0.9rem; }
 a { color: #1d4ed8; }
+.events { max-height: 220px; overflow-y: auto; display: grid; gap: 0.4rem; }
+.event-line { background: #eef2ff; padding: 0.45rem 0.6rem; border-radius: 6px; font-size: 0.9rem; }

@@ -15,12 +15,13 @@ This repository provides a production-ready **baseline architecture** for a proc
   - Set Number
   - Questions
   - Submitted Answers
-- Server-rendered web app (faculty + student dashboards) on top of the APIs.
+- Browser web app entrypoint via `index.html` with real-time updates over WebSocket.
 
 ## Tech Stack (Open Source + Feasible)
 
 - **Backend:** FastAPI + SQLModel + SQLite (swap to PostgreSQL in production)
-- **Web UI:** FastAPI server-rendered HTML + basic CSS
+- **Web UI:** Static `index.html` + vanilla JavaScript + basic CSS
+- **Realtime:** FastAPI WebSocket streams (`/ws/exams/{exam_id}`)
 - **Data processing:** pandas + openpyxl
 - **Auth integration point:** Google OAuth callback endpoint scaffolded
 - **Deployment:** Docker/Kubernetes compatible (containerization can be added next)
@@ -60,10 +61,11 @@ This repository provides a production-ready **baseline architecture** for a proc
 
 ## Web App Overview
 
-- `/` - login screen (email + name + optional roll number)
-- `/web/dashboard?user_id=<id>` - role-based dashboard
-  - faculty: create exams, upload question bank, export CSV
-  - student: view assigned exams, submit proctor event, resume, submit answers
+- `/` - serves `app/static/index.html`
+- `app/static/app.js` - SPA logic for faculty/student flows
+- `/web/state?user_id=<id>` - dashboard state JSON for web app
+- `/ws/exams/{exam_id}` - real-time event stream (proctor events, resume, submissions)
+- Existing REST endpoints are used directly by the web app for CRUD operations.
 
 ## Unique Set Distribution Logic
 
@@ -83,3 +85,5 @@ uvicorn app.main:app --reload
 
 Open docs: `http://127.0.0.1:8000/docs`
 Open web app: `http://127.0.0.1:8000/`
+
+> You do **not** need Node.js for this version; FastAPI serves both API + frontend + realtime sockets.
