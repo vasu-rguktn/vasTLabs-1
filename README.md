@@ -15,10 +15,12 @@ This repository provides a production-ready **baseline architecture** for a proc
   - Set Number
   - Questions
   - Submitted Answers
+- Server-rendered web app (faculty + student dashboards) on top of the APIs.
 
 ## Tech Stack (Open Source + Feasible)
 
 - **Backend:** FastAPI + SQLModel + SQLite (swap to PostgreSQL in production)
+- **Web UI:** FastAPI server-rendered HTML + basic CSS
 - **Data processing:** pandas + openpyxl
 - **Auth integration point:** Google OAuth callback endpoint scaffolded
 - **Deployment:** Docker/Kubernetes compatible (containerization can be added next)
@@ -56,6 +58,13 @@ This repository provides a production-ready **baseline architecture** for a proc
 7. `GET /faculty/exams/{exam_id}/export?faculty_id=<id>`
    - Downloads single CSV of all submissions.
 
+## Web App Overview
+
+- `/` - login screen (email + name + optional roll number)
+- `/web/dashboard?user_id=<id>` - role-based dashboard
+  - faculty: create exams, upload question bank, export CSV
+  - student: view assigned exams, submit proctor event, resume, submit answers
+
 ## Unique Set Distribution Logic
 
 If faculty uploads 600 questions for a section of 60 students and each needs 3 questions,
@@ -73,11 +82,4 @@ uvicorn app.main:app --reload
 ```
 
 Open docs: `http://127.0.0.1:8000/docs`
-
-## Recommended Next Implementation Steps
-
-- Add full JWT session handling after OAuth verification.
-- Add frontend dashboards (React/Next.js).
-- Add websocket proctor stream + snapshots.
-- Add Redis queue for scalable auto-submission timers.
-- Move SQLite to PostgreSQL for multi-instance deployments.
+Open web app: `http://127.0.0.1:8000/`
