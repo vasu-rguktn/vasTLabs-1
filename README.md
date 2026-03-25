@@ -15,10 +15,13 @@ This repository provides a production-ready **baseline architecture** for a proc
   - Set Number
   - Questions
   - Submitted Answers
+- Browser web app entrypoint via `index.html` with real-time updates over WebSocket.
 
 ## Tech Stack (Open Source + Feasible)
 
 - **Backend:** FastAPI + SQLModel + SQLite (swap to PostgreSQL in production)
+- **Web UI:** Static `index.html` + vanilla JavaScript + basic CSS
+- **Realtime:** FastAPI WebSocket streams (`/ws/exams/{exam_id}`)
 - **Data processing:** pandas + openpyxl
 - **Auth integration point:** Google OAuth callback endpoint scaffolded
 - **Deployment:** Docker/Kubernetes compatible (containerization can be added next)
@@ -56,6 +59,14 @@ This repository provides a production-ready **baseline architecture** for a proc
 7. `GET /faculty/exams/{exam_id}/export?faculty_id=<id>`
    - Downloads single CSV of all submissions.
 
+## Web App Overview
+
+- `/` - serves `app/static/index.html`
+- `app/static/app.js` - SPA logic for faculty/student flows
+- `/web/state?user_id=<id>` - dashboard state JSON for web app
+- `/ws/exams/{exam_id}` - real-time event stream (proctor events, resume, submissions)
+- Existing REST endpoints are used directly by the web app for CRUD operations.
+
 ## Unique Set Distribution Logic
 
 If faculty uploads 600 questions for a section of 60 students and each needs 3 questions,
@@ -73,11 +84,6 @@ uvicorn app.main:app --reload
 ```
 
 Open docs: `http://127.0.0.1:8000/docs`
+Open web app: `http://127.0.0.1:8000/`
 
-## Recommended Next Implementation Steps
-
-- Add full JWT session handling after OAuth verification.
-- Add frontend dashboards (React/Next.js).
-- Add websocket proctor stream + snapshots.
-- Add Redis queue for scalable auto-submission timers.
-- Move SQLite to PostgreSQL for multi-instance deployments.
+> You do **not** need Node.js for this version; FastAPI serves both API + frontend + realtime sockets.

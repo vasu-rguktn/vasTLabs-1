@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Proctored Exam Platform - Realtime App</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>Proctored Exam Platform</h1>
+      <p>Single-page web app with real-time exam events (WebSocket).</p>
+
+      <section class="card" id="login-section">
+        <h2>Login</h2>
+        <form id="login-form" class="form-grid">
+          <label>Email <input type="email" name="email" required /></label>
+          <label>Full name <input type="text" name="full_name" required /></label>
+          <label>Roll number (optional) <input type="text" name="roll_number" /></label>
+          <button type="submit">Login</button>
+        </form>
+      </section>
+
+      <section class="card" id="app-section" style="display:none;">
+        <h2 id="welcome"></h2>
+        <p id="role-line"></p>
+        <div id="dashboard"></div>
+      </section>
+
+      <section class="card">
+        <h3>Realtime Event Feed</h3>
+        <div id="events" class="events"></div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
